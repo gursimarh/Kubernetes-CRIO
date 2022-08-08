@@ -1,0 +1,70 @@
+OS=xUbuntu_20.04
+VERSION=1.20
+
+cat >>/etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list<<EOF
+deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /
+EOF
+
+cat >>/etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$VERSION.list<<EOF
+deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$VERSION/$OS/ /
+EOF
+
+curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers.gpg add -
+
+curl -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$VERSION/$OS/Release.key | apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers-cri-o.gpg add -
+
+apt update
+
+apt install -qq -y cri-o cri-o-runc cri-tools
+
+systemctl daemon-reload
+
+systemctl enable --now crio
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+
+
+apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+
+apt install -qq -y kubeadm=1.20.5-00 kubelet=1.20.5-00 kubectl=1.20.5-00
+
+cat >>/etc/modules-load.d/crio.conf<<EOF
+overlay
+br_netfilter
+EOF
+
+modprobe overlay
+
+modprobe br_netfilter
+
+cat >>/etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables  = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+sysctl --system
+
+cat >>/etc/crio/crio.conf.d/02-cgroup-manager.conf<<EOF
+[crio.runtime]
+conmon_cgroup = "pod"
+cgroup_manager = "cgroupfs"
+EOF
+
+systemctl daemon-reload
+
+systemctl enable --now crio
+
+systemctl restart crio
+
+sed -i '/swap/d' /etc/fstab
+
+swapoff -a
+
+systemctl disable --now ufw
+
+kubeadm init --apiserver-advertise-address=172.16.16.100 --pod-network-cidr=192.168.0.0/16
+
+kubectl --kubeconfig=/etc/kubernetes/admin.conf create -f https://docs.projectcalico.org/v3.18/manifests/calico.yaml
+
+kubeadm token create --print-join-command
